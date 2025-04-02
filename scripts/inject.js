@@ -1,5 +1,5 @@
 (function () {
-  // Create counter UI
+  //? Create counter UI
   const counter = document.createElement("div");
   counter.id = "react-render-ui";
   counter.style.cssText = `
@@ -84,6 +84,7 @@
         instance.count++;
         instance.prevProps = currentProps;
         instance.prevState = currentState;
+        highlightComponent(fiber);
       }
 
       updateUI();
@@ -126,4 +127,55 @@ function shallowEqual(objA, objB) {
   }
 
   return true;
+}
+
+const highlightTimers = new Map();
+
+function highlightComponent(fiber) {
+  let domNode = fiber.stateNode;
+
+  if (!domNode) {
+    let nextFiber = fiber.child;
+    while (nextFiber && !nextFiber.stateNode) {
+      nextFiber = nextFiber.child || nextFiber.sibling;
+    }
+    domNode = nextFiber ? nextFiber.stateNode : null;
+  }
+
+  if (domNode && domNode instanceof HTMLElement) {
+    //? If there was a previous highlight, clear the timer and remove previous styles
+    if (highlightTimers.has(domNode)) {
+      clearTimeout(highlightTimers.get(domNode));
+      highlightTimers.delete(domNode);
+
+      domNode.style.backgroundColor = "";
+      domNode.style.boxShadow = "";
+      domNode.style.zIndex = "";
+    }
+
+    //! Save original styles
+    const originalTransition = domNode.style.transition;
+    const originalBackground = domNode.style.backgroundColor;
+    const originalBoxShadow = domNode.style.boxShadow;
+    const originalZIndex = domNode.style.zIndex;
+
+    //? Apply highlight effect
+    domNode.style.transition =
+      "background-color 0.3s ease-out, box-shadow 0.3s ease-out";
+    domNode.style.backgroundColor = "rgba(255, 0, 0, 0.15)";
+    domNode.style.boxShadow = "0 0 12px rgba(255, 0, 0, 0.5)";
+    domNode.style.zIndex = "999999";
+
+    //! Remove highlight smoothly after a delay
+    const timer = setTimeout(() => {
+      domNode.style.backgroundColor = originalBackground;
+      domNode.style.boxShadow = originalBoxShadow;
+      domNode.style.zIndex = originalZIndex;
+      domNode.style.transition = originalTransition;
+      highlightTimers.delete(domNode);
+    }, 500);
+
+    //? Store timeout in case of rapid re-renders
+    highlightTimers.set(domNode, timer);
+  }
 }
