@@ -3,21 +3,20 @@ chrome.runtime.onMessage.addListener((message) => {
     const existingScript = document.getElementById("react-render-counter");
     if (existingScript) {
       const userChoice = window.confirm(
-        "Tracking is already active! Do you want to reset and track a new component?"
+        "Tracking is already active! Do you want to reset?"
       );
       if (!userChoice) return;
 
       existingScript.remove();
-      const existingCounter = document.getElementById("react-render-ui");
-      if (existingCounter) existingCounter.remove(); // Remove counter UI as well
+      document.getElementById("react-render-ui")?.remove();
     }
 
     setTimeout(() => {
-      // Inject new script
       const script = document.createElement("script");
       script.src = chrome.runtime.getURL("scripts/inject.js");
-      script.dataset.componentName = message.componentName;
       script.id = "react-render-counter";
+      script.dataset.componentName = message.componentName;
+      script.dataset.trackMode = message.trackMode;
       document.body.appendChild(script);
     }, 0);
   }
