@@ -1,14 +1,11 @@
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "START_TRACKING") {
-    const existingScript = document.getElementById("react-render-counter");
+    const existingScript = document.getElementById("react-render-message");
     if (existingScript) {
-      const userChoice = window.confirm(
-        "Tracking is already active! Do you want to reset?"
+      window.alert(
+        "Tracking is already active! close the message box to start again."
       );
-      if (!userChoice) return;
-
-      existingScript.remove();
-      document.getElementById("react-render-ui")?.remove();
+      return;
     }
 
     setTimeout(() => {
