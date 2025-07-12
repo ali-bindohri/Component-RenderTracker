@@ -1,5 +1,9 @@
 document.getElementById("startBtn").addEventListener("click", async () => {
   const componentName = document.getElementById("componentName").value;
+  const trackMode = document.querySelector(
+    'input[name="trackMode"]:checked'
+  ).value;
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   await chrome.scripting.executeScript({
@@ -9,6 +13,7 @@ document.getElementById("startBtn").addEventListener("click", async () => {
 
   chrome.tabs.sendMessage(tab.id, {
     type: "START_TRACKING",
-    componentName: componentName,
+    componentName,
+    trackMode,
   });
 });

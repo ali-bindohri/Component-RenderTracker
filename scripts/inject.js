@@ -1,181 +1,165 @@
 (function () {
-  //? Create counter UI
-  const counter = document.createElement("div");
-  counter.id = "react-render-ui";
-  counter.style.cssText = `
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: #1a1a1a;
-  color: #00ff9d;
-  padding: 12px 18px;
-  border-radius: 8px;
-  font-family: monospace;
-  font-size: 14px;
-  z-index: 999999;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-  max-height: 150px;
-  overflow: auto;
-`;
-  document.body.prepend(counter);
+  const componentName = document.currentScript.dataset.componentName;
+  const trackMode = document.currentScript.dataset.trackMode;
+  const isTrackingAll = trackMode === "all";
 
-  //? Global store for tracking render counts per instance
   const renderCounts = {};
+  const highlightTimers = new Map();
+  const originalStyles = new Map();
 
-  //? global hook object to track component tree updates
   const devTools = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
 
-  //? Get component name from script tag
-  const componentName = document.currentScript.dataset.componentName;
+  let counter = null;
+  if (!isTrackingAll) {
+    counter = document.createElement("div");
+    counter.id = "react-render-ui";
+    counter.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #1a1a1a;
+      color: #00ff9d;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 14px;
+      z-index: 999999;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      max-height: 150px;
+      overflow: auto;
+    `;
+    document.body.prepend(counter);
+    counter.innerHTML = `Counter tracker for <b>${componentName}</b> is ready.`;
+  }
 
-  //? Wait for React DevTools hook
   const checkReact = setInterval(() => {
-    if (devTools) {
-      clearInterval(checkReact);
-      startTracking();
+    if (!devTools) {
+      if (counter) {
+        counter.textContent = "⚠️ React DevTools not found!";
+        counter.style.background = "#ff0000";
+      }
       return;
     }
-    counter.textContent = "⚠️ React DevTools not found!";
-    counter.style.background = "#ff0000";
+    clearInterval(checkReact);
+    startTracking();
   }, 100);
 
   function startTracking() {
-    counter.innerHTML = `Counter tracker for <b>${componentName}</b> is ready. Please start rendering!`;
-
-    const originalOnCommitFiberRoot = devTools.onCommitFiberRoot;
+    const originalOnCommit = devTools.onCommitFiberRoot;
 
     devTools.onCommitFiberRoot = (...args) => {
-      originalOnCommitFiberRoot?.(...args);
-
-      //? New: Only check when components actually update
+      originalOnCommit?.(...args);
       const fiberRoot = args[1];
-      checkForUpdates(fiberRoot.current);
+      trackUpdatedFibers(fiberRoot.current);
     };
   }
 
-  function checkForUpdates(fiber) {
+  // React fiber flag for Update (value 1)
+  const UpdateFlag = 1;
+
+  // Traverses the fiber tree, highlights only updated fibers (with UpdateFlag),
+  // and only dives into subtrees marked as updated by subtreeFlags.
+  function trackUpdatedFibers(fiber) {
     if (!fiber) return;
 
+    // Check if this fiber updated
+    const isUpdated = (fiber.flags & UpdateFlag) !== 0;
+    // Check if subtree contains any updated fibers
+    const hasUpdatedDescendants = (fiber.subtreeFlags & UpdateFlag) !== 0;
+
+    // Only track if this fiber updated, and matches mode filter
     const name = fiber.type?.displayName || fiber.type?.name;
 
-    if (name === componentName) {
-      //? Generate a unique ID for each instance
-      const instanceKey =
-        fiber.stateNode?._debugOwner?._debugID ||
-        fiber.alternate?._debugID ||
-        Math.random().toString(36).slice(2);
+    const shouldTrack =
+      isUpdated &&
+      (isTrackingAll || (trackMode === "specific" && name === componentName));
 
-      if (!renderCounts[instanceKey]) {
-        renderCounts[instanceKey] = {
-          count: 0,
-          prevProps: null,
-          prevState: null,
-        };
+    if (shouldTrack) {
+      const key = fiber._debugID || Math.random().toString(36).slice(2);
+      if (!renderCounts[key]) {
+        renderCounts[key] = { count: 0, name };
       }
 
-      const instance = renderCounts[instanceKey];
-      const currentProps = fiber.memoizedProps;
-      const currentState = fiber.memoizedState;
-
-      if (
-        !shallowEqual(instance.prevProps, currentProps) ||
-        !shallowEqual(instance.prevState, currentState)
-      ) {
-        instance.count++;
-        instance.prevProps = currentProps;
-        instance.prevState = currentState;
-        highlightComponent(fiber);
-      }
-
-      updateUI();
+      renderCounts[key].count++;
+      highlightComponent(fiber);
+      if (!isTrackingAll) updateUI();
     }
 
-    checkForUpdates(fiber.child);
-    checkForUpdates(fiber.sibling);
+    // Recurse only into updated subtrees to optimize traversal
+    if (hasUpdatedDescendants) {
+      if (fiber.child) trackUpdatedFibers(fiber.child);
+    }
+
+    // Always check siblings, as they may also have updates
+    if (fiber.sibling) trackUpdatedFibers(fiber.sibling);
   }
 
   function updateUI() {
+    if (!counter) return;
+
     counter.innerHTML = Object.entries(renderCounts)
       .map(
         ([_, instance], index) =>
-          `${componentName} ${index + 1}: ${instance.count} renders`
+          `${instance.name || "Unknown"} ${index + 1}: ${
+            instance.count
+          } renders`
       )
       .join("<br>");
   }
+
+  function highlightComponent(fiber) {
+    let domNode = fiber.stateNode;
+
+    // Find a DOM node for this fiber or its descendants
+    if (!domNode || !(domNode instanceof HTMLElement)) {
+      let next = fiber.child;
+      while (next && !next.stateNode) {
+        next = next.child || next.sibling;
+      }
+      domNode = next?.stateNode || null;
+    }
+
+    if (domNode && domNode instanceof HTMLElement) {
+      // Clear any existing highlight timer & restore style
+      if (highlightTimers.has(domNode)) {
+        clearTimeout(highlightTimers.get(domNode));
+        highlightTimers.delete(domNode);
+        restoreStyle(domNode);
+      }
+
+      // Save original styles on first highlight
+      if (!originalStyles.has(domNode)) {
+        originalStyles.set(domNode, {
+          backgroundColor: domNode.style.backgroundColor,
+          boxShadow: domNode.style.boxShadow,
+          zIndex: domNode.style.zIndex,
+          transition: domNode.style.transition,
+        });
+      }
+
+      // Apply highlight style
+      domNode.style.transition = "background-color 0.3s, box-shadow 0.3s";
+      domNode.style.backgroundColor = "rgba(255, 0, 0, 0.2)";
+      domNode.style.boxShadow = "0 0 8px rgba(255, 0, 0, 0.4)";
+      domNode.style.zIndex = "999999";
+
+      // Remove highlight after delay
+      const timer = setTimeout(() => {
+        restoreStyle(domNode);
+        highlightTimers.delete(domNode);
+      }, 600);
+
+      highlightTimers.set(domNode, timer);
+    }
+  }
+
+  function restoreStyle(domNode) {
+    const original = originalStyles.get(domNode);
+    if (!original) return;
+
+    domNode.style.backgroundColor = original.backgroundColor || "";
+    domNode.style.boxShadow = original.boxShadow || "";
+    domNode.style.zIndex = original.zIndex || "";
+    domNode.style.transition = original.transition || "";
+  }
 })();
-
-function shallowEqual(objA, objB) {
-  if (objA === objB) return true;
-  if (
-    typeof objA !== "object" ||
-    objA === null ||
-    typeof objB !== "object" ||
-    objB === null
-  ) {
-    return false;
-  }
-
-  const keysA = Object.keys(objA);
-  const keysB = Object.keys(objB);
-
-  if (keysA.length !== keysB.length) return false;
-
-  for (let i = 0; i < keysA.length; i++) {
-    if (objA[keysA[i]] !== objB[keysA[i]]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-const highlightTimers = new Map();
-
-function highlightComponent(fiber) {
-  let domNode = fiber.stateNode;
-
-  if (!domNode) {
-    let nextFiber = fiber.child;
-    while (nextFiber && !nextFiber.stateNode) {
-      nextFiber = nextFiber.child || nextFiber.sibling;
-    }
-    domNode = nextFiber ? nextFiber.stateNode : null;
-  }
-
-  if (domNode && domNode instanceof HTMLElement) {
-    //? If there was a previous highlight, clear the timer and remove previous styles
-    if (highlightTimers.has(domNode)) {
-      clearTimeout(highlightTimers.get(domNode));
-      highlightTimers.delete(domNode);
-
-      domNode.style.backgroundColor = "";
-      domNode.style.boxShadow = "";
-      domNode.style.zIndex = "";
-    }
-
-    //! Save original styles
-    const originalTransition = domNode.style.transition;
-    const originalBackground = domNode.style.backgroundColor;
-    const originalBoxShadow = domNode.style.boxShadow;
-    const originalZIndex = domNode.style.zIndex;
-
-    //? Apply highlight effect
-    domNode.style.transition =
-      "background-color 0.3s ease-out, box-shadow 0.3s ease-out";
-    domNode.style.backgroundColor = "rgba(255, 0, 0, 0.15)";
-    domNode.style.boxShadow = "0 0 12px rgba(255, 0, 0, 0.5)";
-    domNode.style.zIndex = "999999";
-
-    //! Remove highlight smoothly after a delay
-    const timer = setTimeout(() => {
-      domNode.style.backgroundColor = originalBackground;
-      domNode.style.boxShadow = originalBoxShadow;
-      domNode.style.zIndex = originalZIndex;
-      domNode.style.transition = originalTransition;
-      highlightTimers.delete(domNode);
-    }, 500);
-
-    //? Store timeout in case of rapid re-renders
-    highlightTimers.set(domNode, timer);
-  }
-}
