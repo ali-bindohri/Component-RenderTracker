@@ -9,6 +9,7 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 
     setTimeout(() => {
+      // Inject Tracker Logic
       const script = document.createElement("script");
       script.src = chrome.runtime.getURL("scripts/inject.js");
       script.id = "react-render-counter";
