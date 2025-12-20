@@ -11,6 +11,8 @@
   //? Get component name and tracking mode from script tag dataset
   const componentName = document.currentScript.dataset.componentName;
   const trackMode = document.currentScript.dataset.trackMode;
+  const highlightColorHex =
+    document.currentScript.dataset.highlightColor || "#58a6ff";
   const isTrackingAll = trackMode === "all";
 
   //? Store render counts and highlight timers/styles
@@ -39,7 +41,7 @@
     bottom: 20px;
     right: 20px;
     background: #0d1117;
-    color: #58a6ff;
+    color: ${highlightColorHex};
     padding: 10px 14px;
     font-family: sans-serif;
     font-size: 13px;
@@ -332,9 +334,17 @@
       });
     }
 
+    //? Helper to convert hex to rgba
+    const hexToRgba = (hex, alpha) => {
+      let r = parseInt(hex.slice(1, 3), 16),
+        g = parseInt(hex.slice(3, 5), 16),
+        b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+
     //? Apply highlight styles (using outline to avoid layout shifts)
-    domNode.style.outline = "2px solid rgba(88, 166, 255, 0.8)";
-    domNode.style.boxShadow = "0 0 0 4px rgba(88, 166, 255, 0.3)";
+    domNode.style.outline = `2px solid ${hexToRgba(highlightColorHex, 0.8)}`;
+    domNode.style.boxShadow = `0 0 0 4px ${hexToRgba(highlightColorHex, 0.3)}`;
     domNode.dataset.renderHighlight = "true";
 
     //? Remove highlight after timeout
