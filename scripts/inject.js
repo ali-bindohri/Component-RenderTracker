@@ -1,8 +1,19 @@
 //? Injected script to track React component re-renders and highlight updated DOM nodes
 (function () {
+  //? Performance utilities and memory
+  const rafQueue = [];
+  const idleQueue = [];
+  const fiberMemory = new Map(); // Store fiber snapshots
+  const MAX_STORED_RENDERS = 100;
+  let rafScheduled = false;
+  let idleScheduled = false;
+  let isTracking = true;
+
   //? Get component name and tracking mode from script tag dataset
   const componentName = document.currentScript.dataset.componentName;
   const trackMode = document.currentScript.dataset.trackMode;
+  const highlightColorHex =
+    document.currentScript.dataset.highlightColor || "#58a6ff";
   const isTrackingAll = trackMode === "all";
 
   //? Store render counts and highlight timers/styles
@@ -23,69 +34,132 @@
     existingClose?.remove();
   }
 
-  //? Create message box UI
+  //? Create message box UI (React Scan Style Toolbar)
   const messageBox = document.createElement("div");
   messageBox.id = "react-render-message";
   messageBox.style.cssText = `
     position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #0d1117;
-    color: #58a6ff;
-    padding: 10px 14px;
-    font-family: sans-serif;
-    font-size: 13px;
-    border-radius: 6px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(13, 17, 23, 0.95);
+    backdrop-filter: blur(12px);
+    color: ${highlightColorHex};
+    padding: 6px 12px;
+    border-radius: 99px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1);
     z-index: 999999;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    user-select: none;
+    transition: all 0.2s ease;
+    cursor: move;
   `;
 
-  const text = document.createElement("span");
-  text.textContent = "Tracking React re-renders...";
+  // Logo
+  const logo = document.createElement("div");
+  logo.style.cssText =
+    "display: flex; align-items: center; gap: 6px; font-weight: 600; color: #c9d1d9;";
+  logo.innerHTML = `<span style="font-size: 16px;">⚛️</span> Render Tracker`;
 
-  //? Create close button for message box
-  const close = document.createElement("button");
-  close.textContent = "✖";
-  close.id = "react-render-close";
-  close.style.cssText = `
-    background: transparent;
-    border: none;
-    color: #999;
-    font-size: 14px;
-    cursor: pointer;
-  `;
+  // Controls Group
+  const controls = document.createElement("div");
+  controls.style.cssText =
+    "display: flex; gap: 4px; padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.1);";
 
-  //? Close button handler: remove UI, restore styles, cleanup
-  close.onclick = () => {
+  const btnStyle =
+    "background: transparent; border: none; cursor: pointer; padding: 4px; fontSize: 14px; border-radius: 4px; transition: opacity 0.2s;";
+
+  const pauseBtn = document.createElement("button");
+  pauseBtn.textContent = "⏸";
+  pauseBtn.title = "Pause/Resume";
+  pauseBtn.style.cssText = btnStyle;
+  pauseBtn.onclick = (e) => {
+    e.stopPropagation(); // Prevent drag start
+    isTracking = !isTracking;
+    pauseBtn.textContent = isTracking ? "⏸" : "▶️";
+    pauseBtn.style.opacity = isTracking ? "1" : "0.5";
+  };
+
+  const clearBtn = document.createElement("button");
+  // clearBtn.textContent = "🚫";
+  clearBtn.title = "Clear Data";
+  clearBtn.style.cssText = btnStyle;
+  clearBtn.onclick = (e) => {
+    e.stopPropagation();
+    for (const k in renderCounts) delete renderCounts[k];
+    fiberMemory.clear();
+    // Flash feedback?
+  };
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "✕";
+  closeBtn.style.cssText = btnStyle + " marginLeft: 12px; opacity: 0.5;";
+  closeBtn.onclick = (e) => {
+    e.stopPropagation();
+    cleanup();
+  };
+
+  controls.append(pauseBtn, clearBtn);
+  messageBox.append(logo, controls, closeBtn);
+  document.body.appendChild(messageBox);
+
+  //? Draggable Logic
+  let isDragging = false;
+  let startX, startY, initialLeft, initialTop;
+
+  messageBox.onmousedown = (e) => {
+    if (e.target.tagName === "BUTTON") return;
+    isDragging = true;
+    messageBox.style.transition = "none";
+
+    // Reset bottom/transform to use top/left absolute
+    const r = messageBox.getBoundingClientRect();
+    messageBox.style.bottom = "auto";
+    messageBox.style.transform = "none";
+    messageBox.style.left = r.left + "px";
+    messageBox.style.top = r.top + "px";
+
+    startX = e.clientX;
+    startY = e.clientY;
+    initialLeft = r.left;
+    initialTop = r.top;
+
+    e.preventDefault();
+  };
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    messageBox.style.left = initialLeft + dx + "px";
+    messageBox.style.top = initialTop + dy + "px";
+  });
+
+  document.addEventListener("mouseup", () => {
+    isDragging = false;
+    messageBox.style.transition = "all 0.2s ease";
+  });
+
+  function cleanup() {
     messageBox.remove();
     devTools.onCommitFiberRoot = originalOnCommit;
-
-    //? Clear highlights
     for (const [node, timer] of highlightTimers.entries()) {
       clearTimeout(timer);
       restoreStyle(node);
     }
-
     highlightTimers.clear();
     originalStyles.clear();
-    close.remove();
+    fiberMemory.clear();
     scriptTag?.remove();
-  };
+  }
 
-  messageBox.appendChild(text);
-  messageBox.appendChild(close);
-  document.body.appendChild(messageBox);
-
-  //? Check for React DevTools, then start tracking
+  //? Check for React DevTools
   const checkReact = setInterval(() => {
-    if (!devTools) {
-      messageBox.textContent = "⚠️ React DevTools not found!";
-      messageBox.style.background = "#ff0000";
-      return;
-    }
+    if (!devTools) return;
     clearInterval(checkReact);
     startTracking();
   }, 100);
@@ -93,6 +167,10 @@
   //? Set up tracking by patching onCommitFiberRoot
   function startTracking() {
     devTools.onCommitFiberRoot = (...args) => {
+      if (!isTracking) {
+        originalOnCommit?.(...args);
+        return;
+      }
       originalOnCommit?.(...args);
       const fiberRoot = args[1];
       trackUpdatedFibers(fiberRoot.current);
@@ -100,6 +178,65 @@
   }
 
   const UpdateFlag = 1; //? React update flag
+
+  //? Helper: Serialize value for comparison and display
+  function serializeValue(value) {
+    if (typeof value === "function") return `ƒ ${value.name || "anonymous"}`;
+    // Basic check for React elements
+    if (value && typeof value === "object" && value.$$typeof)
+      return `<${
+        value.type?.displayName || value.type?.name || "Component"
+      } />`;
+    try {
+      if (typeof value === "object" && value !== null) {
+        if (Array.isArray(value)) return `Array(${value.length})`;
+        return "Object"; // Simplify for now
+      }
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  //? Helper: Shallow clone for snapshot
+  function shallowClone(obj) {
+    if (typeof obj !== "object" || obj === null) return obj;
+    if (Array.isArray(obj)) return [...obj];
+    return { ...obj };
+  }
+
+  //? Capture current fiber state
+  function captureFiberSnapshot(fiber) {
+    return {
+      props: shallowClone(fiber.memoizedProps),
+      state: shallowClone(fiber.memoizedState),
+      context: fiber.dependencies ? shallowClone(fiber.dependencies) : null,
+      timestamp: Date.now(),
+    };
+  }
+
+  //? Change Detection Functions
+  function detectPropsChanges(prev, current) {
+    const changes = [];
+    const allKeys = new Set([
+      ...Object.keys(prev || {}),
+      ...Object.keys(current || {}),
+    ]);
+
+    for (const key of allKeys) {
+      // Ignore children and internal props
+      if (key === "children" || key.startsWith("_")) continue;
+
+      if (!Object.is(prev?.[key], current?.[key])) {
+        changes.push({
+          key,
+          prev: serializeValue(prev?.[key]),
+          current: serializeValue(current?.[key]),
+        });
+      }
+    }
+    return changes;
+  }
 
   //? Recursively track updated fibers and highlight them
   function trackUpdatedFibers(fiber) {
@@ -118,12 +255,54 @@
     if (shouldTrack) {
       //? Use _debugID if available, else random key
       const key = fiber._debugID || Math.random().toString(36).slice(2);
+
+      // Get previous snapshot
+      const prevSnapshot = fiberMemory.get(key);
+      const currentSnapshot = captureFiberSnapshot(fiber);
+
+      // Analyze reason
+      let reasons = [];
+      if (prevSnapshot) {
+        const propsChanges = detectPropsChanges(
+          prevSnapshot.props,
+          currentSnapshot.props
+        );
+        if (propsChanges.length > 0) {
+          reasons.push({ type: "props", changes: propsChanges });
+        }
+
+        // Simple state check (memoizedState changes)
+        if (prevSnapshot.state !== currentSnapshot.state) {
+          // If props didn't change but we re-rendered, and state logic is complex,
+          // we might assume state unless we can prove otherwise.
+          // Ideally we'd compare hooks deeper. For now, mark as state/hooks.
+          reasons.push({ type: "state", changes: [] });
+        }
+
+        // Parent force update fallback
+        if (reasons.length === 0) {
+          reasons.push({ type: "parent", changes: [] });
+        }
+      } else {
+        reasons.push({ type: "mount", changes: [] });
+      }
+
+      // Update memory
+      fiberMemory.set(key, currentSnapshot);
+
+      // Clean up old memory
+      if (fiberMemory.size > MAX_STORED_RENDERS) {
+        const firstKey = fiberMemory.keys().next().value;
+        fiberMemory.delete(firstKey);
+      }
+
       if (!renderCounts[key]) {
         renderCounts[key] = { count: 0, name };
       }
-
       renderCounts[key].count++;
-      highlightComponent(fiber);
+
+      // Schedule UI updates
+      scheduleHighlight(fiber);
     }
 
     //? Recursively check child and sibling fibers
@@ -136,8 +315,8 @@
     }
   }
 
-  //? Highlight the DOM node for a fiber
-  function highlightComponent(fiber) {
+  //? Schedule Highlight via RAF
+  function scheduleHighlight(fiber) {
     let domNode = fiber.stateNode;
 
     //? If no DOM node, try to find one in child fibers
@@ -150,37 +329,62 @@
     }
 
     if (domNode && domNode instanceof HTMLElement) {
-      //? If already highlighted, clear previous timer and restore style
-      if (highlightTimers.has(domNode)) {
-        clearTimeout(highlightTimers.get(domNode));
-        highlightTimers.delete(domNode);
-        restoreStyle(domNode);
+      rafQueue.push(domNode);
+      if (!rafScheduled) {
+        rafScheduled = true;
+        requestAnimationFrame(processHighlightQueue);
       }
-
-      //? Save original styles for restoration
-      if (!originalStyles.has(domNode)) {
-        originalStyles.set(domNode, {
-          backgroundColor: domNode.style.backgroundColor,
-          boxShadow: domNode.style.boxShadow,
-          zIndex: domNode.style.zIndex,
-          transition: domNode.style.transition,
-        });
-      }
-
-      //? Apply highlight styles
-      domNode.style.transition = "background-color 0.3s, box-shadow 0.3s";
-      domNode.style.backgroundColor = "rgba(88, 166, 255, 0.15)";
-      domNode.style.boxShadow = "0 0 8px rgba(88, 166, 255, 0.6)";
-      domNode.style.zIndex = "999999";
-
-      //? Remove highlight after timeout
-      const timer = setTimeout(() => {
-        restoreStyle(domNode);
-        highlightTimers.delete(domNode);
-      }, 600);
-
-      highlightTimers.set(domNode, timer);
     }
+  }
+
+  //? Process Highlight Queue
+  function processHighlightQueue() {
+    rafScheduled = false;
+    while (rafQueue.length > 0) {
+      const domNode = rafQueue.shift();
+      highlightComponent(domNode);
+    }
+  }
+
+  //? Highlight the DOM node for a fiber
+  function highlightComponent(domNode) {
+    //? If already highlighted, clear previous timer and restore style
+    if (highlightTimers.has(domNode)) {
+      clearTimeout(highlightTimers.get(domNode));
+      highlightTimers.delete(domNode);
+      restoreStyle(domNode);
+    }
+
+    //? Save original styles for restoration
+    if (!originalStyles.has(domNode)) {
+      originalStyles.set(domNode, {
+        border: domNode.style.border,
+        boxShadow: domNode.style.boxShadow,
+        // We do not save/restore outline as we use it for highlighting
+        outline: domNode.style.outline,
+      });
+    }
+
+    //? Helper to convert hex to rgba
+    const hexToRgba = (hex, alpha) => {
+      let r = parseInt(hex.slice(1, 3), 16),
+        g = parseInt(hex.slice(3, 5), 16),
+        b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+
+    //? Apply highlight styles (using outline to avoid layout shifts)
+    domNode.style.outline = `2px solid ${hexToRgba(highlightColorHex, 0.8)}`;
+    domNode.style.boxShadow = `0 0 0 4px ${hexToRgba(highlightColorHex, 0.3)}`;
+    domNode.dataset.renderHighlight = "true";
+
+    //? Remove highlight after timeout
+    const timer = setTimeout(() => {
+      restoreStyle(domNode);
+      highlightTimers.delete(domNode);
+    }, 1000);
+
+    highlightTimers.set(domNode, timer);
   }
 
   //? Restore original styles to DOM node
@@ -188,9 +392,8 @@
     const original = originalStyles.get(domNode);
     if (!original) return;
 
-    domNode.style.backgroundColor = original.backgroundColor || "";
+    domNode.style.outline = original.outline || "";
     domNode.style.boxShadow = original.boxShadow || "";
-    domNode.style.zIndex = original.zIndex || "";
-    domNode.style.transition = original.transition || "";
+    delete domNode.dataset.renderHighlight;
   }
 })();

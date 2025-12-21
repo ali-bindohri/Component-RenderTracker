@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>React Render Tracker Test</title>
+    <script
+      src="https://unpkg.com/react@18/umd/react.development.js"
+      crossorigin
+    ></script>
+    <script
+      src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"
+      crossorigin
+    ></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        padding: 20px;
+        background: #222;
+        color: #eee;
+      }
+      .card {
+        background: #333;
+        padding: 20px;
+        margin: 10px 0;
+        border-radius: 8px;
+        border: 1px solid #444;
+      }
+      button {
+        background: #444;
+        border: 1px solid #666;
+        color: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 8px;
+      }
+      button:hover {
+        background: #555;
+      }
+      h2 {
+        margin-top: 0;
+      }
+      .section {
+        margin-bottom: 30px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Render Tracker Test Cases</h1>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, createContext, useContext, useMemo, memo } = React;
+
+      const ThemeContext = createContext("light");
+
+      // 1. Simple Props Change
+      function PropsTester({ label, count }) {
+        return (
+          <div class="card">
+            <h3>Props Component</h3>
+            <p>
+              Label: <code>{label}</code>
+            </p>
+            <p>
+              Count: <code>{count}</code>
+            </p>
+          </div>
+        );
+      }
+
+      // 2. State Change
+      function StateTester() {
+        const [localCount, setLocalCount] = useState(0);
+        return (
+          <div class="card">
+            <h3>State Component</h3>
+            <p>Local Count: {localCount}</p>
+            <button onClick={() => setLocalCount((c) => c + 1)}>
+              Update State
+            </button>
+            {/* Nested child that should trigger Parent update reason if not memoized */}
+            <SimpleChild />
+          </div>
+        );
+      }
+
+      function SimpleChild() {
+        return (
+          <div style={{ marginTop: 10, padding: 10, background: "#444" }}>
+            I am a child component
+          </div>
+        );
+      }
+
+      // 3. Context Change
+      function ContextConsumer() {
+        const theme = useContext(ThemeContext);
+        return (
+          <div
+            class="card"
+            style={{ borderColor: theme === "dark" ? "gold" : "#444" }}
+          >
+            <h3>Context Consumer</h3>
+            <p>
+              Current Theme: <b>{theme}</b>
+            </p>
+          </div>
+        );
+      }
+
+      // 4. Object Props (Reference Change)
+      const ObjectPropsChild = memo(function ({ config }) {
+        return (
+          <div class="card">
+            <h3>Object Props (Memo)</h3>
+            <p>Config ID: {config.id}</p>
+          </div>
+        );
+      });
+
+      function App() {
+        const [appCount, setAppCount] = useState(0);
+        const [name, setName] = useState("Alice");
+        const [theme, setTheme] = useState("dark");
+
+        // Unstable object (new reference every render)
+        const unstableConfig = { id: appCount, type: "unstable" };
+
+        // Stable object
+        const stableConfig = useMemo(() => ({ id: 100, type: "stable" }), []);
+
+        return (
+          <ThemeContext.Provider value={theme}>
+            <div className="section">
+              <h2>Global Controls</h2>
+              <button onClick={() => setAppCount((c) => c + 1)}>
+                Increment App Count ({appCount})
+              </button>
+              <button
+                onClick={() =>
+                  setName((n) => (n === "Alice" ? "Bob" : "Alice"))
+                }
+              >
+                Toggle Name
+              </button>
+              <button
+                onClick={() =>
+                  setTheme((t) => (t === "dark" ? "light" : "dark"))
+                }
+              >
+                Toggle Theme
+              </button>
+            </div>
+
+            <div className="section">
+              <h2>Test Scenarios</h2>
+              <PropsTester label={name} count={appCount} />
+              <StateTester />
+              <ContextConsumer />
+              <ObjectPropsChild config={unstableConfig} />
+            </div>
+          </ThemeContext.Provider>
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
