@@ -7,6 +7,7 @@
   const MAX_STORED_RENDERS = 100;
   let rafScheduled = false;
   let idleScheduled = false;
+  let isTracking = true;
 
   //? Get component name and tracking mode from script tag dataset
   const componentName = document.currentScript.dataset.componentName;
@@ -33,62 +34,101 @@
     existingClose?.remove();
   }
 
-  //? Create message box UI
+  //? Create message box UI (React Scan Style Toolbar)
   const messageBox = document.createElement("div");
   messageBox.id = "react-render-message";
   messageBox.style.cssText = `
     position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #0d1117;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(13, 17, 23, 0.95);
+    backdrop-filter: blur(12px);
     color: ${highlightColorHex};
-    padding: 10px 14px;
-    font-family: sans-serif;
-    font-size: 13px;
-    border-radius: 6px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    padding: 6px 12px;
+    border-radius: 99px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1);
     z-index: 999999;
     display: flex;
     align-items: center;
-    gap: 10px;
-    cursor: move;
+    gap: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 13px;
     user-select: none;
+    transition: all 0.2s ease;
+    cursor: move;
   `;
 
-  const text = document.createElement("span");
-  text.textContent = "Tracking React re-renders...";
+  // Logo
+  const logo = document.createElement("div");
+  logo.style.cssText =
+    "display: flex; align-items: center; gap: 6px; font-weight: 600; color: #c9d1d9;";
+  logo.innerHTML = `<span style="font-size: 16px;">⚛️</span> Render Tracker`;
 
-  //? Create close button for message box
-  const close = document.createElement("button");
-  close.textContent = "✖";
-  close.id = "react-render-close";
-  close.style.cssText = `
-    background: transparent;
-    border: none;
-    color: #999;
-    font-size: 14px;
-    cursor: pointer;
-    font-family: inherit;
-  `;
+  // Controls Group
+  const controls = document.createElement("div");
+  controls.style.cssText =
+    "display: flex; gap: 4px; padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.1);";
+
+  const btnStyle =
+    "background: transparent; border: none; cursor: pointer; padding: 4px; fontSize: 14px; border-radius: 4px; transition: opacity 0.2s;";
+
+  const pauseBtn = document.createElement("button");
+  pauseBtn.textContent = "⏸";
+  pauseBtn.title = "Pause/Resume";
+  pauseBtn.style.cssText = btnStyle;
+  pauseBtn.onclick = (e) => {
+    e.stopPropagation(); // Prevent drag start
+    isTracking = !isTracking;
+    pauseBtn.textContent = isTracking ? "⏸" : "▶️";
+    pauseBtn.style.opacity = isTracking ? "1" : "0.5";
+  };
+
+  const clearBtn = document.createElement("button");
+  // clearBtn.textContent = "🚫";
+  clearBtn.title = "Clear Data";
+  clearBtn.style.cssText = btnStyle;
+  clearBtn.onclick = (e) => {
+    e.stopPropagation();
+    for (const k in renderCounts) delete renderCounts[k];
+    fiberMemory.clear();
+    // Flash feedback?
+  };
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "✕";
+  closeBtn.style.cssText = btnStyle + " marginLeft: 12px; opacity: 0.5;";
+  closeBtn.onclick = (e) => {
+    e.stopPropagation();
+    cleanup();
+  };
+
+  controls.append(pauseBtn, clearBtn);
+  messageBox.append(logo, controls, closeBtn);
+  document.body.appendChild(messageBox);
 
   //? Draggable Logic
   let isDragging = false;
   let startX, startY, initialLeft, initialTop;
 
   messageBox.onmousedown = (e) => {
-    if (e.target === close) return; // Don't drag if clicking close
+    if (e.target.tagName === "BUTTON") return;
     isDragging = true;
+    messageBox.style.transition = "none";
+
+    // Reset bottom/transform to use top/left absolute
+    const r = messageBox.getBoundingClientRect();
+    messageBox.style.bottom = "auto";
+    messageBox.style.transform = "none";
+    messageBox.style.left = r.left + "px";
+    messageBox.style.top = r.top + "px";
+
     startX = e.clientX;
     startY = e.clientY;
-    const rect = messageBox.getBoundingClientRect();
-    initialLeft = rect.left;
-    initialTop = rect.top;
+    initialLeft = r.left;
+    initialTop = r.top;
 
-    // Switch to top/left positioning for dragging
-    messageBox.style.bottom = "auto";
-    messageBox.style.right = "auto";
-    messageBox.style.left = initialLeft + "px";
-    messageBox.style.top = initialTop + "px";
+    e.preventDefault();
   };
 
   document.addEventListener("mousemove", (e) => {
@@ -101,38 +141,25 @@
 
   document.addEventListener("mouseup", () => {
     isDragging = false;
+    messageBox.style.transition = "all 0.2s ease";
   });
 
-  //? Close button handler: remove UI, restore styles, cleanup
-  close.onclick = () => {
+  function cleanup() {
     messageBox.remove();
     devTools.onCommitFiberRoot = originalOnCommit;
-
-    //? Clear highlights
     for (const [node, timer] of highlightTimers.entries()) {
       clearTimeout(timer);
       restoreStyle(node);
     }
-
     highlightTimers.clear();
     originalStyles.clear();
     fiberMemory.clear();
-    close.remove();
     scriptTag?.remove();
-  };
+  }
 
-  messageBox.appendChild(text);
-  messageBox.appendChild(close);
-  document.body.appendChild(messageBox);
-
-  //? Check for React DevTools, then start tracking
+  //? Check for React DevTools
   const checkReact = setInterval(() => {
-    if (!devTools) {
-      messageBox.textContent = "⚠️ React DevTools not found!";
-      messageBox.style.background = "#2d0a0a"; // Darker red for better contrast on dark bg
-      messageBox.style.color = "#ff6b6b";
-      return;
-    }
+    if (!devTools) return;
     clearInterval(checkReact);
     startTracking();
   }, 100);
@@ -140,6 +167,10 @@
   //? Set up tracking by patching onCommitFiberRoot
   function startTracking() {
     devTools.onCommitFiberRoot = (...args) => {
+      if (!isTracking) {
+        originalOnCommit?.(...args);
+        return;
+      }
       originalOnCommit?.(...args);
       const fiberRoot = args[1];
       trackUpdatedFibers(fiberRoot.current);
