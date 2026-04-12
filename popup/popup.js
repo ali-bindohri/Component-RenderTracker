@@ -27,35 +27,23 @@ colorInput.addEventListener("input", (e) => {
 // Handle Pick Button
 pickBtn.addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const highlightColor = document.getElementById("highlightColor").value;
 
-  // Inject content script if needed (mostly ensured by manifest, but to be safe/lazy load)
+  // Inject content script first (for the message bridge)
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     files: ["scripts/content.js"],
   });
 
-  const highlightColor = document.getElementById("highlightColor").value; // Capture current color
-  chrome.tabs.sendMessage(tab.id, { type: "ACTIVATE_PICKER", highlightColor });
-  window.close(); // Optional: close popup to let user pick, or stay open?
-  // UX decision: User needs to click on page, so popup will close anyway.
-});
+  // Ask background to inject picker into main world
+  chrome.runtime.sendMessage({
+    type: "INJECT_PICKER",
+    tabId: tab.id,
+    highlightColor,
+  });
 
-// Listen for picked component message (if we keep popup open, but usually popup closes)
-// Actually, since popup closes when user clicks webpage, we can't receive the message here easily.
-// Ideally:
-// 1. User clicks Pick.
-// 2. Popup closes.
-// 3. Page enters pick mode.
-// 4. User clicks component.
-// 5. Component Name is saved to storage OR simply alerted?
-// WAIT: If popup closes, we lose context.
-// Better UX:
-// The user picks a component. The NAME is copied to clipboard OR stored in chrome.storage.local.
-// Next time popup opens, we autofill from storage or clipboard?
-// OR: We just assume the user remembers it?
-// BETTER: The picker copies to clipboard.
-// EVEN BETTER: We re-open the popup? (Hard)
-// LET'S DO: Copy to Clipboard and Show a Toast on the Page.
+  window.close();
+});
 
 document.getElementById("startBtn").addEventListener("click", async () => {
   const componentName = document.getElementById("componentName").value;
@@ -66,13 +54,16 @@ document.getElementById("startBtn").addEventListener("click", async () => {
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
+  // Inject content script first (for the message bridge)
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     files: ["scripts/content.js"],
   });
 
-  chrome.tabs.sendMessage(tab.id, {
-    type: "START_TRACKING",
+  // Ask background to inject tracker into main world
+  chrome.runtime.sendMessage({
+    type: "INJECT_TRACKER",
+    tabId: tab.id,
     componentName,
     trackMode,
     highlightColor,
