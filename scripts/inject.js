@@ -9,12 +9,14 @@
   let idleScheduled = false;
   let isTracking = true;
 
-  //? Get component name and tracking mode from script tag dataset
-  const componentName = document.currentScript.dataset.componentName;
-  const trackMode = document.currentScript.dataset.trackMode;
-  const highlightColorHex =
-    document.currentScript.dataset.highlightColor || "#58a6ff";
+  //? Get component name and tracking mode from config set by background script
+  const config = window.__RENDER_TRACKER_CONFIG__ || {};
+  const componentName = config.componentName;
+  const trackMode = config.trackMode;
+  const highlightColorHex = config.highlightColor || "#58a6ff";
   const isTrackingAll = trackMode === "all";
+  // Clean up the config from the window object
+  delete window.__RENDER_TRACKER_CONFIG__;
 
   //? Store render counts and highlight timers/styles
   const renderCounts = {};
@@ -26,7 +28,6 @@
   const originalOnCommit = devTools?.onCommitFiberRoot;
 
   //? Remove any existing message box and close button
-  const scriptTag = document.currentScript;
   const existingBox = document.getElementById("react-render-message");
   const existingClose = document.getElementById("react-render-close");
   if (existingBox || existingClose) {
@@ -154,7 +155,7 @@
     highlightTimers.clear();
     originalStyles.clear();
     fiberMemory.clear();
-    scriptTag?.remove();
+
   }
 
   //? Check for React DevTools
